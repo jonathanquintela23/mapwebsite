@@ -18,8 +18,8 @@ html,body{height:100%;font-family:'Sora',sans-serif;background:var(--bg);color:v
 .chip{font-size:10px;padding:3px 9px;border-radius:20px;font-family:'DM Mono',monospace;background:#1a2a2f;color:var(--acc);border:1px solid #2a4a50}
 #main{flex:1;display:flex;min-height:0}
 #sidebar{width:380px;flex-shrink:0;background:var(--sur);border-right:1px solid var(--bor);display:flex;flex-direction:column;overflow:hidden}
-#map-wrap{flex:1;position:relative}
-#map{width:100%;height:100%}
+#map-wrap{flex:1;position:relative;min-height:0}
+#map{width:100%;height:100%;min-height:400px}
 
 #panel{padding:13px;border-bottom:1px solid var(--bor)}
 #mode-tabs{display:flex;background:var(--sur2);border-radius:var(--rad);padding:3px;margin-bottom:11px}
@@ -190,11 +190,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
           Search any Florida address to discover nearby vendors, competitors, and commercial properties for sale — covering Miami, Orlando, Tampa, Jacksonville, and everywhere in between.
         </div>
       </div>
-        <div class="welcome">
-          <strong>Florida Business Intelligence</strong>
-          Search any Florida address to discover nearby vendors, competitors, and commercial properties for sale — covering Miami, Orlando, Tampa, Jacksonville, and everywhere in between.
-        </div>
-      </div>
     </div>
     <div id="map-wrap">
       <div id="map"></div>
@@ -210,6 +205,11 @@ L.control.zoom({position:'topright'}).addTo(map);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',maxZoom:19
 }).addTo(map);
+// Force map to recalculate its container size after full page paint.
+// This fixes the black-screen bug on Vercel and other static hosts where
+// flex layout finalizes after Leaflet's first render.
+window.addEventListener('load', () => { map.invalidateSize(); });
+setTimeout(() => { map.invalidateSize(); }, 300);
 
 let allMarkers={vendors:[],comp:[],sale:[]};
 let locMarker=null,radCircle=null,curMode='ai',curView='vendors',curBizKey='coffee_shop';
@@ -767,46 +767,74 @@ function nearby(arr,lat,lng,miles){
   return arr.map(v=>({...v,dist:distMi(lat,lng,v.lat,v.lng)})).filter(v=>v.dist<=miles).sort((a,b)=>a.dist-b.dist);
 }
 
-// ── PIN ICONS — fixed anchor so pin tip points to exact location ──
+// ── PIN ICONS — pure SVG, pixel-perfect anchoring ──
+// All map-point pins: the tip of the SVG path is at the BOTTOM CENTER.
+// iconAnchor = [half-width, full-height] puts the tip on the coordinate.
+
 function vendorPin(color){
-  // Circle pin: anchor at center bottom of the icon
-  return L.divIcon({className:'',
-    html:`<div style="width:22px;height:22px;background:${color};border:3px solid #0d0f14;border-radius:50%;box-shadow:0 0 0 3px ${color}55,0 4px 12px rgba(0,0,0,.6)"></div>`,
-    iconSize:[22,22],
-    iconAnchor:[11,11],  // center of circle
-    popupAnchor:[0,-14]
+  // Teardrop shape: circle on top, pointed bottom. 32px wide, 40px tall.
+  // Tip is at [16, 40].
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
+    <path d="M16 0 C7.16 0 0 7.16 0 16 C0 24 16 40 16 40 C16 40 32 24 32 16 C32 7.16 24.84 0 16 0Z"
+      fill="${color}" stroke="#0d0f14" stroke-width="2.5"/>
+    <circle cx="16" cy="15" r="6" fill="#0d0f14" opacity="0.35"/>
+  </svg>`;
+  return L.divIcon({
+    className:'',
+    html:svg,
+    iconSize:[32,40],
+    iconAnchor:[16,40],
+    popupAnchor:[0,-42]
   });
 }
+
 function compPin(isChain){
-  const c=isChain?'#fc8181':'#ff4444';
-  // Square pin with pointed bottom using CSS clip
-  return L.divIcon({className:'',
-    html:`<div style="position:relative;width:28px;height:34px">
-      <div style="width:28px;height:28px;background:${c};border:3px solid #0d0f14;border-radius:6px;box-shadow:0 0 0 2px ${c}55,0 4px 12px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1">⚔️</div>
-      <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid ${c};margin:0 auto;margin-top:-1px"></div>
-    </div>`,
-    iconSize:[28,34],
-    iconAnchor:[14,34],  // tip of the pointer
-    popupAnchor:[0,-36]
+  const fill=isChain?'#fc8181':'#ff4444';
+  const icon=isChain?'⚔':'★';
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
+    <path d="M16 0 C7.16 0 0 7.16 0 16 C0 24 16 40 16 40 C16 40 32 24 32 16 C32 7.16 24.84 0 16 0Z"
+      fill="${fill}" stroke="#0d0f14" stroke-width="2.5"/>
+    <text x="16" y="20" text-anchor="middle" dominant-baseline="central"
+      font-size="13" fill="#0d0f14" font-weight="bold">${icon}</text>
+  </svg>`;
+  return L.divIcon({
+    className:'',
+    html:svg,
+    iconSize:[32,40],
+    iconAnchor:[16,40],
+    popupAnchor:[0,-42]
   });
 }
+
 function salePin(){
-  return L.divIcon({className:'',
-    html:`<div style="position:relative;width:28px;height:34px">
-      <div style="width:28px;height:28px;background:#b794f4;border:3px solid #0d0f14;border-radius:6px;box-shadow:0 0 0 2px #b794f455,0 4px 12px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1">🏢</div>
-      <div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #b794f4;margin:0 auto;margin-top:-1px"></div>
-    </div>`,
-    iconSize:[28,34],
-    iconAnchor:[14,34],  // tip of the pointer
-    popupAnchor:[0,-36]
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
+    <path d="M16 0 C7.16 0 0 7.16 0 16 C0 24 16 40 16 40 C16 40 32 24 32 16 C32 7.16 24.84 0 16 0Z"
+      fill="#b794f4" stroke="#0d0f14" stroke-width="2.5"/>
+    <text x="16" y="20" text-anchor="middle" dominant-baseline="central"
+      font-size="13" fill="#0d0f14" font-weight="bold">$</text>
+  </svg>`;
+  return L.divIcon({
+    className:'',
+    html:svg,
+    iconSize:[32,40],
+    iconAnchor:[16,40],
+    popupAnchor:[0,-42]
   });
 }
+
 function locPin(){
-  return L.divIcon({className:'',
-    html:`<div style="width:24px;height:24px;background:#fff;border:4px solid #4fd1c5;border-radius:50%;box-shadow:0 0 0 5px rgba(79,209,197,.3),0 4px 14px rgba(0,0,0,.5)"></div>`,
-    iconSize:[24,24],
-    iconAnchor:[12,12],  // center
-    popupAnchor:[0,-14]
+  // Pulsing ring + white center dot. Anchor at center [16,16].
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="14" fill="rgba(79,209,197,0.2)" stroke="#4fd1c5" stroke-width="2"/>
+    <circle cx="16" cy="16" r="7" fill="#fff" stroke="#4fd1c5" stroke-width="3"/>
+    <circle cx="16" cy="16" r="3" fill="#4fd1c5"/>
+  </svg>`;
+  return L.divIcon({
+    className:'',
+    html:svg,
+    iconSize:[32,32],
+    iconAnchor:[16,16],
+    popupAnchor:[0,-18]
   });
 }
 
@@ -841,15 +869,16 @@ function switchView(v){
 
 function updateLegend(v){
   const leg=document.getElementById('legend');
+  const td=c=>`<svg width="14" height="18" viewBox="0 0 32 40" style="vertical-align:middle;margin-right:7px;flex-shrink:0"><path d="M16 0 C7.16 0 0 7.16 0 16 C0 24 16 40 16 40 C16 40 32 24 32 16 C32 7.16 24.84 0 16 0Z" fill="${c}" stroke="#0d0f14" stroke-width="3"/></svg>`;
   if(v==='vendors'){
     const cats=VENDOR_CATS[curBizKey]||[];
-    leg.innerHTML=cats.map(c=>`<div class="leg-row"><div class="leg-dot" style="background:${c.color}"></div><span style="font-size:11px;color:var(--mut)">${c.label}</span></div>`).join('');
+    leg.innerHTML=cats.map(c=>`<div class="leg-row">${td(c.color)}<span style="font-size:11px;color:var(--mut)">${c.label}</span></div>`).join('');
   }else if(v==='comp'){
     leg.innerHTML=
-      '<div class="leg-row"><div class="leg-sq" style="background:#fc8181">⚔️</div><span style="font-size:11px;color:var(--mut)">Chain competitor</span></div>'+
-      '<div class="leg-row"><div class="leg-sq" style="background:#ff4444">⚔️</div><span style="font-size:11px;color:var(--mut)">Independent competitor</span></div>';
+      `<div class="leg-row">${td('#fc8181')}<span style="font-size:11px;color:var(--mut)">Chain competitor</span></div>`+
+      `<div class="leg-row">${td('#ff4444')}<span style="font-size:11px;color:var(--mut)">Independent</span></div>`;
   }else{
-    leg.innerHTML='<div class="leg-row"><div class="leg-sq" style="background:#b794f4">🏢</div><span style="font-size:11px;color:var(--mut)">Commercial property for sale</span></div>';
+    leg.innerHTML=`<div class="leg-row">${td('#b794f4')}<span style="font-size:11px;color:var(--mut)">For sale listing</span></div>`;
   }
   leg.classList.add('vis');
 }
